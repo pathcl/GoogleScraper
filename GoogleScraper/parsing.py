@@ -5,15 +5,13 @@ import os
 import re
 import lxml.html
 from lxml.html.clean import Cleaner
-import logging
 from urllib.parse import unquote
 import pprint
 from GoogleScraper.database import SearchEngineResultsPage
-from GoogleScraper.config import Config
-from GoogleScraper.log import out
+import logging
 from cssselect import HTMLTranslator
 
-logger = logging.getLogger('GoogleScraper')
+logger = logging.getLogger(__name__)
 
 
 class InvalidSearchTypeException(Exception):
@@ -71,7 +69,7 @@ class Parser():
     # If you didn't specify the search type in the search_types list, this attribute
     # will not be evaluated and no data will be parsed.
 
-    def __init__(self, html=None, query=''):
+    def __init__(self, config={}, html='', query=''):
         """Create new Parser instance and parse all information.
 
         Args:
@@ -83,7 +81,8 @@ class Parser():
             Assertion error if the subclassed
             specific parser cannot handle the the settings.
         """
-        self.searchtype = Config['SCRAPING'].get('search_type', 'normal')
+        self.config = config
+        self.searchtype = self.config.get('search_type', 'normal')
         assert self.searchtype in self.search_types, 'search type "{}" is not supported in {}'.format(
             self.searchtype,
             self.__class__.__name__
@@ -141,6 +140,7 @@ class Parser():
         
         Raises: InvalidSearchTypeException if no css selectors for the searchtype could be found.
         """
+        self.num_results = 0
         self._parse_lxml(cleaner)
 
         # try to parse the number of results.
@@ -152,8 +152,8 @@ class Parser():
 
         self.num_results_for_query = self.first_match(num_results_selector, self.dom)
         if not self.num_results_for_query:
-            out('{}: Cannot parse num_results from serp page with selectors {}'.format(self.__class__.__name__,
-                                                                                       num_results_selector), lvl=4)
+            logger.debug('{}: Cannot parse num_results from serp page with selectors {}'.format(self.__class__.__name__,
+                                                                                       num_results_selector))
 
         # get the current page we are at. Sometimes we search engines don't show this.
         try:
@@ -164,8 +164,10 @@ class Parser():
         # let's see if the search query was shitty (no results for that query)
         self.effective_query = self.first_match(self.effective_query_selector, self.dom)
         if self.effective_query:
-            out('{}: There was no search hit for the search query. Search engine used {} instead.'.format(
-                self.__class__.__name__, self.effective_query), lvl=4)
+            logger.debug('{}: There was no search hit for the search query. Search engine used {} instead.'.format(
+                self.__class__.__name__, self.effective_query))
+        else:
+            self.effective_query = ''
 
         # the element that notifies the user about no results.
         self.no_results_text = self.first_match(self.no_results_selector, self.dom)
@@ -342,7 +344,7 @@ class GoogleParser(Parser):
 
     search_types = ['normal', 'image']
 
-    effective_query_selector = ['#topstuff .med > b::text']
+    effective_query_selector = ['#topstuff .med > b::text', '.med > a > b::text']
 
     no_results_selector = []
 
@@ -354,7 +356,7 @@ class GoogleParser(Parser):
         'results': {
             'us_ip': {
                 'container': '#center_col',
-                'result_container': 'li.g ',
+                'result_container': 'div.g ',
                 'link': 'h3.r > a:first-child::attr(href)',
                 'snippet': 'div.s span.st::text',
                 'title': 'h3.r > a:first-child::text',
@@ -472,7 +474,10 @@ class YandexParser(Parser):
 
     effective_query_selector = ['.misspell__message .misspell__link']
 
-    num_results_search_selectors = ['.serp-adv .serp-item__wrap > strong']
+    # @TODO: In december 2015, I saw that yandex only shows the number of search results in the search input field
+    # with javascript. One can scrape it in plain http mode, but the values are hidden in some javascript and not
+    # accessible with normal xpath/css selectors. A normal text search is done.
+    num_results_search_selectors = ['.serp-adv .serp-item__wrap > strong', '.input__found_visibility_visible font font::text']
 
     page_number_selectors = ['.pager__group .button_checked_yes span::text']
 
@@ -480,7 +485,7 @@ class YandexParser(Parser):
         'results': {
             'de_ip': {
                 'container': 'div.serp-list',
-                'result_container': 'div.serp-item__wrap ',
+                'result_container': 'div.serp-item',
                 'link': 'a.serp-item__title-link::attr(href)',
                 'snippet': 'div.serp-item__text::text',
                 'title': 'a.serp-item__title-link::text',
@@ -532,6 +537,17 @@ class YandexParser(Parser):
             if self.num_results == 0:
                 self.no_results = True
 
+            # very hackish, probably prone to all kinds of errors.
+            if not self.num_results_for_query:
+                substr = 'function() { var title = "%s —' % self.query
+                try:
+                    i = self.html.index(substr)
+                    if i:
+                        self.num_results_for_query = re.search(r'— (.)*?"', self.html[i:i+len(self.query) + 150]).group()
+                except Exception as e:
+                    logger.debug(str(e))
+
+
         if self.searchtype == 'image':
             for key, i in self.iter_serp_items():
                 for regex in (
@@ -555,7 +571,7 @@ class BingParser(Parser):
 
     num_results_search_selectors = ['.sb_count']
 
-    effective_query_selector = ['#sp_requery a > strong']
+    effective_query_selector = ['#sp_requery a > strong', '#sp_requery + #sp_recourse a::attr(href)']
 
     page_number_selectors = ['.sb_pagS::text']
 
@@ -656,10 +672,9 @@ class YahooParser(Parser):
 
     no_results_selector = []
 
-    # yahooo doesn't have such a thing :D
-    effective_query_selector = ['']
+    effective_query_selector = ['.msg #cquery a::attr(href)']
 
-    num_results_search_selectors = ['#pg > span:last-child']
+    num_results_search_selectors = ['#pg > span:last-child', '.compPagination span::text']
 
     page_number_selectors = ['#pg > strong::text']
 
@@ -672,7 +687,15 @@ class YahooParser(Parser):
                 'snippet': 'div.abstr::text',
                 'title': 'div > h3 > a::text',
                 'visible_link': 'span.url::text'
-            }
+            },
+            'de_ip_december_2015': {
+                'container': '#main',
+                'result_container': '.searchCenterMiddle li',
+                'link': 'h3.title a::attr(href)',
+                'snippet': '.compText p::text',
+                'title': 'h3.title a::text',
+                'visible_link': 'span::text'
+            },
         },
     }
 
@@ -834,7 +857,15 @@ class DuckduckgoParser(Parser):
                 'snippet': 'result__snippet::text',
                 'title': '.result__title > a::text',
                 'visible_link': '.result__url__domain::text'
-            }
+            },
+            'non_javascript_mode': {
+                'container': '#content',
+                'result_container': '.results_links',
+                'link': '.links_main > a::attr(href)',
+                'snippet': '.snippet::text',
+                'title': '.links_main > a::text',
+                'visible_link': '.url::text'
+            },
         },
     }
 
@@ -979,10 +1010,10 @@ def get_parser_by_search_engine(search_engine):
     elif search_engine == 'blekko':
         return BlekkoParser
     else:
-        raise NoParserForSearchEngineException('No such parser for {}'.format(search_engine))
+        raise NoParserForSearchEngineException('No such parser for "{}"'.format(search_engine))
 
 
-def parse_serp(html=None, parser=None, scraper=None, search_engine=None, query=''):
+def parse_serp(config, html=None, parser=None, scraper=None, search_engine=None, query=''):
     """Store the parsed data in the sqlalchemy session.
 
     If no parser is supplied then we are expected to parse again with
@@ -1000,7 +1031,7 @@ def parse_serp(html=None, parser=None, scraper=None, search_engine=None, query='
 
     if not parser and html:
         parser = get_parser_by_search_engine(search_engine)
-        parser = parser(query=query)
+        parser = parser(config, query=query)
         parser.parse(html)
 
     serp = SearchEngineResultsPage()

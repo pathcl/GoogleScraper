@@ -15,7 +15,6 @@ can be assigned to more than one ScraperSearch. Therefore we need a n:m relation
 """
 
 import datetime
-from GoogleScraper.config import Config
 from urllib.parse import urlparse
 from sqlalchemy import Column, String, Integer, ForeignKey, Table, DateTime, Enum, Boolean
 from sqlalchemy.ext.declarative import declarative_base
@@ -69,7 +68,7 @@ class SearchEngineResultsPage(Base):
     requested_by = Column(String, default='127.0.0.1')
 
     # The string in the SERP that indicates how many results we got for the search term.
-    num_results_for_query = Column(String)
+    num_results_for_query = Column(String, default='')
 
     # Whether we got any results at all. This is the same as len(serp.links)
     num_results = Column(Integer, default=-1)
@@ -86,7 +85,8 @@ class SearchEngineResultsPage(Base):
     # automatically search other similar search queries when they find no results.
     # Sometimes they have results for the query, but detect a spelling mistake and only
     # suggest an alternative. This is another case!
-    # If no_results is true, then there weren't ANY RESULTS FOUND FOR THIS QUERY!!!
+    # If no_results is true, then there weren't ANY RESULTS FOUND FOR THIS QUERY!!! But there
+    # could have been results for an auto corrected query.
     no_results = Column(Boolean, default=False)
 
     def __str__(self):
@@ -97,6 +97,10 @@ class SearchEngineResultsPage(Base):
         return self.__str__()
 
     def has_no_results_for_query(self):
+        """
+        Returns True if the original query did not yield any results.
+        Returns False if either there are no serp entries, or the search engine auto corrected the query.
+        """
         return self.num_results == 0 or self.effective_query
 
     def set_values_from_parser(self, parser):
@@ -241,7 +245,7 @@ class SearchEngineProxyStatus(Base):
     last_check = Column(DateTime)
 
 
-def get_engine(path=None):
+def get_engine(config, path=None):
     """Return the sqlalchemy engine.
 
     Args:
@@ -250,17 +254,17 @@ def get_engine(path=None):
     Returns:
         The sqlalchemy engine.
     """
-    db_path = path if path else Config['OUTPUT'].get('database_name', 'google_scraper') + '.db'
-    echo = True if (Config['GLOBAL'].getint('verbosity', 0) >= 4) else False
+    db_path = path if path else config.get('database_name', 'google_scraper') + '.db'
+    echo = config.get('log_sqlalchemy', False)
     engine = create_engine('sqlite:///' + db_path, echo=echo, connect_args={'check_same_thread': False})
     Base.metadata.create_all(engine)
 
     return engine
 
 
-def get_session(scoped=False, engine=None, path=None):
+def get_session(config, scoped=False, engine=None, path=None):
     if not engine:
-        engine = get_engine(path=path)
+        engine = get_engine(config, path=path)
 
     session_factory = sessionmaker(
         bind=engine,
@@ -275,10 +279,10 @@ def get_session(scoped=False, engine=None, path=None):
         return session_factory
 
 
-def fixtures(session):
+def fixtures(config, session):
     """Add some base data."""
 
-    for se in Config['SCRAPING'].get('supported_search_engines', '').split(','):
+    for se in config.get('supported_search_engines', []):
         if se:
             search_engine = session.query(SearchEngine).filter(SearchEngine.name == se).first()
             if not search_engine:

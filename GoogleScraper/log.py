@@ -2,33 +2,29 @@
 
 import sys
 import logging
-from GoogleScraper.config import Config
 
+"""
+Loggers are created at the top of modules. Therefore each code may access
+a logger. But there is a fundamental problem to this approach:
+
+The configuration that determines the state of GoogleScraper may come from various
+sources and is parsed only at runtime in the config.py module. In this config, the
+loglevel is also specified.
+
+So we need to adjust the loglevel to the value set in
+the configuration for each submodule.
+"""
 
 def setup_logger(level=logging.INFO):
-    """Setup the global configuration logger for GoogleScraper"""
-    logger = logging.getLogger('GoogleScraper')
+    """
+    Configure global log settings for GoogleScraper
+    """
+    logger = logging.getLogger()
     logger.setLevel(level)
 
-    ch = logging.StreamHandler(stream=sys.stderr)
-    ch.setLevel(level)
-
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-
-
-logger = logging.getLogger('GoogleScraper')
-
-
-def out(msg, lvl=2):
-    level = Config['GLOBAL'].getint('verbosity', 2)
-    if lvl <= level:
-        logger.info(msg)
-
-
-def raise_or_log(msg, exception_obj=Exception):
-    if Config['SCRAPING'].getboolean('raise_exceptions_while_scraping', False):
-        raise exception_obj(msg)
-    else:
-        logger.warning(msg)
+    # See here: http://stackoverflow.com/questions/7173033/duplicate-log-output-when-using-python-logging-module
+    if not len(logger.handlers):
+        ch = logging.StreamHandler(stream=sys.stderr)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)

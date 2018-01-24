@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 from GoogleScraper import scrape_with_config, GoogleSearchError
@@ -10,20 +11,13 @@ with open('keywords.txt', 'wt') as f:
 
 # See in the config.cfg file for possible values
 config = {
-    'SCRAPING': {
-        'use_own_ip': 'True',
-        'keyword_file': 'keywords.txt',
-        'search_engines': 'bing,duckduckgo',
-        'num_pages_for_keyword': 2,
-        'scrape_method': 'http-async',
-    },
-    'GLOBAL': {
-        'verbosity': 3,
-        'do_caching': 'True'
-    },
-    'OUTPUT': {
-        'output_filename': 'out.csv'
-    }
+    'use_own_ip': True,
+    'keyword_file': 'keywords.txt',
+    'search_engines': ['bing', 'duckduckgo'],
+    'num_pages_for_keyword': 2,
+    'scrape_method': 'http-async',
+    'do_caching': True,
+    'output_filename': 'out.csv',
 }
 
 try:

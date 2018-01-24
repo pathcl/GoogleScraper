@@ -2,7 +2,7 @@
 
 import logging
 
-logger = logging.getLogger('GoogleScraper')
+logger = logging.getLogger(__name__)
 
 """
 The core logic of GoogleScraper is handled here.
